@@ -12,24 +12,23 @@ resize();
 let isRunning = false;
 let speedMultiplier = 1.0; 
 let showAxes = true;
+let pathMode = 'tail'; // 轨迹模式: 'tail', 'all', 'none'
 
-// 物理引擎常数重构：1单位质量 = 1太阳质量，1单位半径 = 1太阳半径
-// 为了维持之前好看的轨道形状，我们大幅提高内部 G 值以抵消质量数值的缩小 (原来M=100，现在M=1)
 const G = 5000; 
 const dt = 0.05; 
 const softening = 5; 
-const VISUAL_RADIUS_MULTI = 8; // 1太阳半径 = 8 屏幕像素
+const VISUAL_RADIUS_MULTI = 8; 
 
-// --- 摄像机系统 (控制平移和缩放) ---
+// --- 摄像机系统 ---
 let camera = { x: 0, y: 0, zoom: 1.0 };
 
 class Body {
     constructor(x, y, vx, vy, mass, color, radius, id) {
         this.x = x; this.y = y;
         this.vx = vx; this.vy = vy;
-        this.mass = mass; // 太阳质量 M⊙
+        this.mass = mass;
         this.color = color;
-        this.radius = radius; // 太阳半径 R⊙
+        this.radius = radius;
         this.id = id;
         this.path = [];
     }
@@ -50,7 +49,6 @@ class Body {
 let bodies = [];
 
 function initBodies() {
-    // 逻辑原点 (0,0) 就是宇宙中心
     camera = { x: 0, y: 0, zoom: 1.0 };
     bodies = [
         new Body(-150, 0, 0, 1.5, 1.0, '#ff4d4d', 1.0, 0),
@@ -81,44 +79,57 @@ function updatePhysics() {
     for (let i = 0; i < bodies.length; i++) {
         bodies[i].x += bodies[i].vx * currentDt;
         bodies[i].y += bodies[i].vy * currentDt;
-
-        if (Math.random() < 0.2) {
-            bodies[i].path.push({x: bodies[i].x, y: bodies[i].y});
-            if (bodies[i].path.length > 300) bodies[i].path.shift();
-        }
     }
 }
 
+// 采用全新的、高性能、无拖影的轨迹渲染
 function drawPaths() {
+    if (pathMode === 'none') return;
+
+    const baseWidth = 1.5 / camera.zoom;
+    
     for (let i = 0; i < bodies.length; i++) {
-        if(bodies[i].path.length === 0) continue;
-        ctx.beginPath();
-        ctx.moveTo(bodies[i].path[0].x, bodies[i].path[0].y);
-        for (let p = 1; p < bodies[i].path.length; p++) {
-            ctx.lineTo(bodies[i].path[p].x, bodies[i].path[p].y);
+        const path = bodies[i].path;
+        if (path.length < 2) continue;
+
+        if (pathMode === 'tail') {
+            // 渐隐模式：独立线段透明度渲染
+            for (let p = 1; p < path.length; p++) {
+                ctx.beginPath();
+                ctx.moveTo(path[p-1].x, path[p-1].y);
+                ctx.lineTo(path[p].x, path[p].y);
+                ctx.strokeStyle = bodies[i].color;
+                ctx.lineWidth = baseWidth;
+                ctx.globalAlpha = p / path.length; // 越老的轨迹越透明
+                ctx.stroke();
+            }
+            ctx.globalAlpha = 1.0;
+        } else if (pathMode === 'all') {
+            // 全局模式：单次长线渲染，性能最优化
+            ctx.beginPath();
+            ctx.moveTo(path[0].x, path[0].y);
+            for (let p = 1; p < path.length; p++) {
+                ctx.lineTo(path[p].x, path[p].y);
+            }
+            ctx.strokeStyle = bodies[i].color;
+            ctx.lineWidth = baseWidth;
+            ctx.globalAlpha = 0.8;
+            ctx.stroke();
+            ctx.globalAlpha = 1.0;
         }
-        ctx.strokeStyle = bodies[i].color;
-        ctx.lineWidth = 1.5 / camera.zoom; 
-        ctx.globalAlpha = 0.6;
-        ctx.stroke();
-        ctx.globalAlpha = 1.0;
     }
 }
 
-// --- 自适应坐标轴计算核心 ---
 function drawAxes() {
     if (!showAxes) return;
 
-    // 获取当前屏幕对应的物理坐标边界
-    const left = screenToWorld(0, 0).x;
-    const right = screenToWorld(canvas.width, 0).x;
-    const top = screenToWorld(0, 0).y;
-    const bottom = screenToWorld(0, canvas.height).y;
+    // 屏幕边缘在物理世界中的坐标 (用于锁定文字标签位置)
+    const left = camera.x - canvas.width / 2 / camera.zoom;
+    const right = camera.x + canvas.width / 2 / camera.zoom;
+    const top = camera.y - canvas.height / 2 / camera.zoom;
+    const bottom = camera.y + canvas.height / 2 / camera.zoom;
 
-    // 期望每隔大概 120 像素画一条刻度线
     const targetIntervalWorld = 120 / camera.zoom; 
-    
-    // 算法：寻找最接近 targetIntervalWorld 的 1, 2, 5 整数倍间隔
     const log10 = Math.floor(Math.log10(targetIntervalWorld));
     const pow10 = Math.pow(10, log10);
     const fraction = targetIntervalWorld / pow10;
@@ -128,79 +139,86 @@ function drawAxes() {
     else if (fraction < 3.5) niceMultiplier = 2;
     else if (fraction < 7.5) niceMultiplier = 5;
     else niceMultiplier = 10;
-    
-    const interval = niceMultiplier * pow10; // 最终完美的刻度间隔
+    const interval = niceMultiplier * pow10;
 
     ctx.save();
     ctx.lineWidth = 1 / camera.zoom;
-    ctx.font = `${12 / camera.zoom}px sans-serif`;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
+    ctx.font = `${13 / camera.zoom}px sans-serif`;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
 
-    // 画网格线和数字
+    // 绘制X轴方向的垂直网格线 (数字吸附在屏幕下方边缘)
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
     const startX = Math.ceil(left / interval) * interval;
+    const labelY = bottom - 10 / camera.zoom; // 无论怎么滚动，Y轴标签始终在屏幕最下面
+    
     for (let x = startX; x <= right; x += interval) {
         ctx.beginPath();
-        // 主坐标轴加粗，其他半透明
-        ctx.strokeStyle = Math.abs(x) < 0.001 ? 'rgba(255, 255, 255, 0.4)' : 'rgba(255, 255, 255, 0.1)';
+        ctx.strokeStyle = Math.abs(x) < 0.001 ? 'rgba(255, 255, 255, 0.5)' : 'rgba(255, 255, 255, 0.1)';
         ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke();
-        ctx.fillText(Number(x.toFixed(2)).toString(), x, camera.y + 5 / camera.zoom); // 刻度数字跟着屏幕中心走
+        
+        let text = parseFloat(x.toPrecision(4)).toString() + " R⊙";
+        ctx.fillText(text, x, labelY);
     }
 
+    // 绘制Y轴方向的水平网格线 (数字吸附在屏幕左侧边缘)
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     const startY = Math.ceil(top / interval) * interval;
+    const labelX = left + 10 / camera.zoom; // 始终在屏幕最左边
+    
     for (let y = startY; y <= bottom; y += interval) {
         ctx.beginPath();
-        ctx.strokeStyle = Math.abs(y) < 0.001 ? 'rgba(255, 255, 255, 0.4)' : 'rgba(255, 255, 255, 0.1)';
+        ctx.strokeStyle = Math.abs(y) < 0.001 ? 'rgba(255, 255, 255, 0.5)' : 'rgba(255, 255, 255, 0.1)';
         ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
-        if(Math.abs(y) > 0.001) ctx.fillText(Number(y.toFixed(2)).toString(), camera.x + 5 / camera.zoom, y);
+        
+        if (Math.abs(y) > 0.001) { // 原点不重复绘制
+            let text = parseFloat(y.toPrecision(4)).toString() + " R⊙";
+            ctx.fillText(text, labelX, y);
+        }
     }
-    
     ctx.restore();
 }
 
 function animate() {
+    // 关键修复：不再使用半透明尾迹清理，而是直接物理实心清理，彻底杜绝拖拽滞后！
+    ctx.fillStyle = '#050508';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
     if (isRunning) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
         for(let step = 0; step < 5; step++) updatePhysics();
-    } else {
-        ctx.fillStyle = '#050508';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 仅在每帧渲染时记录一次点（解耦物理步长，使轨迹更加平滑且可控）
+        if (pathMode !== 'none') {
+            for (let i = 0; i < bodies.length; i++) {
+                bodies[i].path.push({x: bodies[i].x, y: bodies[i].y});
+                // 如果是渐隐尾迹模式，限制长度为150 (约2.5秒的尾巴)
+                if (pathMode === 'tail' && bodies[i].path.length > 150) {
+                    bodies[i].path.shift();
+                }
+            }
+        }
     }
 
-    // --- 应用摄像机矩阵变换 ---
     ctx.save();
-    ctx.translate(canvas.width / 2, canvas.height / 2); // 屏幕中心作为缩放基点
+    ctx.translate(canvas.width / 2, canvas.height / 2); 
     ctx.scale(camera.zoom, camera.zoom);
-    ctx.translate(-camera.x, -camera.y); // 平移偏移量
+    ctx.translate(-camera.x, -camera.y); 
 
     drawAxes();
     drawPaths();
     for (let i = 0; i < bodies.length; i++) bodies[i].draw();
 
     ctx.restore(); 
-
     requestAnimationFrame(animate);
 }
 
 /* ================== 坐标转换与交互逻辑 ================== */
 
-// 屏幕坐标 -> 物理坐标
 function screenToWorld(sx, sy) {
     return {
         x: (sx - canvas.width / 2) / camera.zoom + camera.x,
         y: (sy - canvas.height / 2) / camera.zoom + camera.y
-    };
-}
-
-// 物理坐标 -> 屏幕坐标
-function worldToScreen(wx, wy) {
-    return {
-        x: (wx - camera.x) * camera.zoom + canvas.width / 2,
-        y: (wy - camera.y) * camera.zoom + canvas.height / 2
     };
 }
 
@@ -215,22 +233,18 @@ canvas.addEventListener('mousedown', (e) => {
     const worldPos = screenToWorld(sx, sy);
     lastMousePos = { x: sx, y: sy };
 
-    // 优先判断是否点中星体
     for (let i = bodies.length - 1; i >= 0; i--) {
         const b = bodies[i];
         const visualR = b.radius * VISUAL_RADIUS_MULTI;
-        const dx = worldPos.x - b.x;
-        const dy = worldPos.y - b.y;
         const hitTolerance = (visualR + 10) / camera.zoom; 
         
-        if (dx * dx + dy * dy <= hitTolerance * hitTolerance) {
+        if (Math.hypot(worldPos.x - b.x, worldPos.y - b.y) <= hitTolerance) {
             draggedBody = b;
             if(isRunning) btnToggle.click(); 
             b.path = []; b.vx = 0; b.vy = 0; 
             return;
         }
     }
-    // 没点中星体，则开始拖拽相机背景
     isDraggingCamera = true;
 });
 
@@ -244,43 +258,36 @@ canvas.addEventListener('mousemove', (e) => {
         draggedBody.x = worldPos.x;
         draggedBody.y = worldPos.y;
     } else if (isDraggingCamera) {
-        const dx = sx - lastMousePos.x;
-        const dy = sy - lastMousePos.y;
-        camera.x -= dx / camera.zoom;
-        camera.y -= dy / camera.zoom;
+        camera.x -= (sx - lastMousePos.x) / camera.zoom;
+        camera.y -= (sy - lastMousePos.y) / camera.zoom;
         lastMousePos = { x: sx, y: sy };
     } else {
-        // 判定鼠标样式
         const worldPos = screenToWorld(sx, sy);
-        let hovering = false;
-        for (let b of bodies) {
-            const dx = worldPos.x - b.x; const dy = worldPos.y - b.y;
-            const hitTol = (b.radius * VISUAL_RADIUS_MULTI + 10) / camera.zoom;
-            if (dx * dx + dy * dy <= hitTol * hitTol) { hovering = true; break; }
-        }
+        let hovering = bodies.some(b => 
+            Math.hypot(worldPos.x - b.x, worldPos.y - b.y) <= (b.radius * VISUAL_RADIUS_MULTI + 10) / camera.zoom
+        );
         canvas.style.cursor = hovering ? 'pointer' : (isDraggingCamera ? 'grabbing' : 'grab');
     }
 });
 
-window.addEventListener('mouseup', () => {
-    draggedBody = null;
-    isDraggingCamera = false;
-    canvas.style.cursor = 'grab';
-});
-
-// 鼠标滚轮缩放以屏幕中心为基准
+window.addEventListener('mouseup', () => { draggedBody = null; isDraggingCamera = false; canvas.style.cursor = 'grab'; });
 canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
-    if (e.deltaY < 0) camera.zoom *= 1.1; 
-    else camera.zoom /= 1.1;
-    camera.zoom = Math.max(0.05, Math.min(camera.zoom, 20.0));
+    camera.zoom = Math.max(0.05, Math.min(camera.zoom * (e.deltaY < 0 ? 1.1 : 1/1.1), 20.0));
 }, { passive: false });
-
 
 /* ================== UI 控制逻辑 ================== */
 
 const btnToggle = document.getElementById('btn-toggle');
 const btnReset = document.getElementById('btn-reset');
+const panel = document.getElementById('ui-panel');
+const btnCollapse = document.getElementById('btn-collapse');
+
+// 侧边栏折叠逻辑
+btnCollapse.addEventListener('click', () => {
+    panel.classList.toggle('collapsed');
+    btnCollapse.textContent = panel.classList.contains('collapsed') ? '➕' : '➖';
+});
 
 btnToggle.addEventListener('click', () => {
     isRunning = !isRunning;
@@ -295,16 +302,20 @@ btnReset.addEventListener('click', () => {
     initBodies();
 });
 
-document.getElementById('show-axes').addEventListener('change', (e) => {
-    showAxes = e.target.checked;
-});
+document.getElementById('show-axes').addEventListener('change', (e) => showAxes = e.target.checked);
 
 document.getElementById('sim-speed').addEventListener('input', (e) => {
     speedMultiplier = Number(e.target.value);
     document.getElementById('speed-val').textContent = speedMultiplier.toFixed(1);
 });
 
-// 滑块和数字输入框的双向绑定同步
+// 轨迹显示模式切换逻辑
+document.getElementById('path-mode').addEventListener('change', (e) => {
+    pathMode = e.target.value;
+    if (pathMode === 'none') bodies.forEach(b => b.path = []); // 切换为不显示时清空内存
+    if (pathMode === 'tail') bodies.forEach(b => b.path = b.path.slice(-150)); // 从全局切换为尾迹时截断
+});
+
 function setupUIBindings() {
     for (let i = 0; i < 3; i++) {
         const mSlide = document.getElementById(`m-slide-${i}`);
@@ -312,30 +323,16 @@ function setupUIBindings() {
         const rSlide = document.getElementById(`r-slide-${i}`);
         const rNum = document.getElementById(`r-num-${i}`);
 
-        // 滑块改变 -> 同步给输入框和物理实体
-        mSlide.addEventListener('input', (e) => {
-            mNum.value = e.target.value;
-            bodies[i].mass = Number(e.target.value);
-        });
-        rSlide.addEventListener('input', (e) => {
-            rNum.value = e.target.value;
-            bodies[i].radius = Number(e.target.value);
-        });
+        mSlide.addEventListener('input', (e) => { mNum.value = e.target.value; bodies[i].mass = Number(e.target.value); });
+        rSlide.addEventListener('input', (e) => { rNum.value = e.target.value; bodies[i].radius = Number(e.target.value); });
 
-        // 输入框手动输入 -> 同步给滑块和物理实体
         mNum.addEventListener('input', (e) => {
             let val = Number(e.target.value);
-            if(val > 0) {
-                mSlide.value = val;
-                bodies[i].mass = val;
-            }
+            if(val > 0) { mSlide.value = val; bodies[i].mass = val; }
         });
         rNum.addEventListener('input', (e) => {
             let val = Number(e.target.value);
-            if(val > 0) {
-                rSlide.value = val;
-                bodies[i].radius = val;
-            }
+            if(val > 0) { rSlide.value = val; bodies[i].radius = val; }
         });
     }
 }
