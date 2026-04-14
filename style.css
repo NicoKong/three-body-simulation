@@ -10,7 +10,7 @@ canvas:active { cursor: grabbing; }
 
 #ui-panel {
     position: absolute; top: 20px; right: 20px;
-    width: 320px; background: rgba(20, 20, 25, 0.85); 
+    width: 330px; background: rgba(20, 20, 25, 0.85); 
     backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px; padding: 20px; color: white;
     box-shadow: 0 10px 30px rgba(0,0,0,0.5);
@@ -18,13 +18,8 @@ canvas:active { cursor: grabbing; }
 }
 
 #ui-panel.collapsed { width: 220px; padding-bottom: 10px;}
-#panel-content { 
-    max-height: 80vh; overflow-y: auto; transition: opacity 0.3s, max-height 0.3s;
-}
-#ui-panel.collapsed #panel-content {
-    max-height: 0; opacity: 0; overflow: hidden; margin: 0; border: none;
-}
-
+#panel-content { max-height: 80vh; overflow-y: auto; transition: opacity 0.3s, max-height 0.3s; }
+#ui-panel.collapsed #panel-content { max-height: 0; opacity: 0; overflow: hidden; margin: 0; border: none; }
 #panel-content::-webkit-scrollbar { width: 6px; }
 #panel-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 3px; }
 
@@ -54,8 +49,7 @@ button {
 .btn-reset:hover { background-color: #777; }
 
 .body-settings {
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 8px; padding: 10px; margin-bottom: 10px;
+    background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 10px; margin-bottom: 10px;
 }
 .body-settings h3 { margin: 0 0 10px 0; font-size: 16px; text-shadow: 0 0 5px rgba(255,255,255,0.3); }
 
@@ -71,6 +65,6 @@ select { flex: 1; padding: 5px; background: #111; color: white; border: 1px soli
 .input-group label { width: 70px; }
 .input-group input[type=range] { flex: 1; cursor: pointer; }
 .input-group input[type=number] { 
-    width: 45px; padding: 3px 5px; border: 1px solid #444; 
-    background: #111; color: #fff; border-radius: 4px; text-align: center;
+    width: 60px; padding: 3px 5px; border: 1px solid #444; 
+    background: #111; color: #fff; border-radius: 4px; text-align: center; font-family: monospace;
 }
